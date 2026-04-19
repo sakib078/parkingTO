@@ -1,4 +1,4 @@
-# ParkFinder - Toronto Parking Spot Finder
+# ParkingTO - Toronto Parking Spot Finder
 
 ParkFinder helps drivers quickly locate nearby parking in Toronto. It combines map search, nearest-spot detection, and parking dataset import into one app.
 
