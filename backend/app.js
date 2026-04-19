@@ -45,10 +45,18 @@ app.use(async (req, res, next) => {
   if (mongoose.connection.readyState === 1) {
     return next();
   }
-  
+
   try {
-    const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
-    await mongoose.connect(mongoUri, { 
+    let finalUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
+
+    // Automatically fix the user's password if it contains an unencoded '@' symbol!
+    // If the URI has exactly two '@' symbols, the first one belongs to the password.
+    const parts = finalUri.split('@');
+    if (parts.length === 3) {
+      finalUri = parts[0] + '%40' + parts[1] + '@' + parts[2];
+    }
+
+    await mongoose.connect(finalUri, {
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
     });
