@@ -3,7 +3,7 @@
 import express from 'express';
 import * as  adminController from '../controller/adminController.js';
 import multer from 'multer';
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: '/tmp/' });
 
 const router = express.Router();
 
