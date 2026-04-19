@@ -6,3 +6,8 @@ https://cloud.maptiler.com/maps/
 
 entreprice level map:
 https://www.mapbox.com/
+
+
+mermaid generator:
+
+npx -y @mermaid-js/mermaid-cli -i docs/diagram.mmd -o docs/architecture.png

@@ -1,0 +1,37 @@
+graph TD
+    %% Styling
+    classDef client fill:#0d9488,stroke:#0f766e,stroke-width:2px,color:#fff,rx:8,ry:8
+    classDef external fill:#f59e0b,stroke:#b45309,stroke-width:2px,color:#fff,rx:8,ry:8
+    classDef backend fill:#2563eb,stroke:#1e40af,stroke-width:2px,color:#fff,rx:8,ry:8
+    classDef database fill:#059669,stroke:#047857,stroke-width:2px,color:#fff,rx:8,ry:8
+
+    %% Components
+    subgraph Client ["🖥️ Frontend UI"]
+        ReactApp["React Application<br/>(Tailwind CSS, MapLibre GL JS)"]:::client
+    end
+
+    subgraph External_APIs ["☁️ External Services"]
+        MapTiler["MapTiler API<br/>(Geocoding & Tiles)"]:::external
+        GoogleMaps["Google Maps<br/>(External Directions)"]:::external
+    end
+
+    subgraph Backend_Server ["⚙️ Backend Express Server"]
+        API["Node.js + Express REST API"]:::backend
+        SearchEngine["Geospatial Search<br/>(Nearest Spots Logic)"]:::backend
+        AdminController["Admin Layer<br/>(JSON Data Import)"]:::backend
+        
+        API --> SearchEngine
+        API --> AdminController
+    end
+
+    subgraph DB ["🗄️ Database Tier"]
+        MongoDB[("MongoDB Atlas<br/>(Geospatial Indexing)")]:::database
+    end
+
+    %% Connections
+    ReactApp -- "Address Search & Map Render" --> MapTiler
+    ReactApp -- "Redirect for Directions" --> GoogleMaps
+    ReactApp -- "Search & Coordinate Data" --> API
+    
+    SearchEngine -- "Location Queries ($near)" --> MongoDB
+    AdminController -- "Bulk Insert & CRUD" --> MongoDB

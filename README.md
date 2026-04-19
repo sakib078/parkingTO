@@ -19,10 +19,9 @@ Rendered image:
 
 ![Architecture Diagram](docs/architecture.png)
 
-
 ## Tech stack
-- Frontend: React, Tailwind CSS, Google Maps API, Axios
-- Backend: Node.js, Express, MongoDB Atlas, Mongoose, Multer
+- Frontend: React, Tailwind CSS, MapLibre GL JS, MapTiler, Axios
+- Backend: Node.js, Express, MongoDB Atlas, Mongoose
 
 ## API overview
 - Public:
