@@ -25,7 +25,8 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "http://localhost:3000");
+  const origin = process.env.FRONTEND_URL || "http://localhost:3000";
+  res.header("Access-Control-Allow-Origin", origin);
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -33,14 +34,30 @@ app.use((req, res, next) => {
 });
 
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   methods: 'OPTIONS, GET, POST, PUT, PATCH, DELETE',
   allowedHeaders: 'Content-Type, Authorization'
 }));
 
+// Vercel Serverless DB Connection Pooling
+let isDbConnected = false;
+app.use(async (req, res, next) => {
+  if (!isDbConnected) {
+    try {
+      const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
+      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
+      isDbConnected = true;
+      console.log('Connected to MongoDB (Serverless pool)');
+    } catch (err) {
+      console.error('Mongoose cold-start connection failed', err);
+    }
+  }
+  next();
+});
 
-app.use('/admin', adminRoutes);
-app.use('/park', parkingRoutes);
+
+app.use('/api/admin', adminRoutes);
+app.use('/api/park', parkingRoutes);
 
 // 404 Not Found handler
 app.use(notFoundMiddleware);
@@ -49,14 +66,18 @@ app.use(notFoundMiddleware);
 app.use(errorMiddleware);
 
 
-app.listen(app.get('port'), async () => {
-  try {
-    const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
-    await mongoose.connect(mongoUri);
-    console.log('Connected to MongoDB successfully');
-    console.log(`Server running on port http://localhost:${app.get('port')}/`);
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(app.get('port'), async () => {
+    try {
+      const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
+      await mongoose.connect(mongoUri);
+      isDbConnected = true;
+      console.log('Connected to MongoDB successfully (Local)');
+      console.log(`Server running on port http://localhost:${app.get('port')}/`);
+    } catch (error) {
+      console.error('Error connecting to MongoDB:', error);
+    }
+  });
+}
 
-  } catch (error) {
-    console.error('Error connecting to MongoDB:', error);
-  }
-});
+export default app;
