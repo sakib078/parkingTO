@@ -40,19 +40,25 @@ app.use(cors({
 }));
 
 // Vercel Serverless DB Connection Pooling
-let isDbConnected = false;
 app.use(async (req, res, next) => {
-  if (!isDbConnected) {
-    try {
-      const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
-      await mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 });
-      isDbConnected = true;
-      console.log('Connected to MongoDB (Serverless pool)');
-    } catch (err) {
-      console.error('Mongoose cold-start connection failed', err);
-    }
+  // If already connected, safely continue
+  if (mongoose.connection.readyState === 1) {
+    return next();
   }
-  next();
+  
+  try {
+    const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
+    await mongoose.connect(mongoUri, { 
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+    });
+    console.log('Connected to MongoDB (Serverless pool)');
+    next();
+  } catch (err) {
+    console.error('Mongoose cold-start connection failed:', err.message);
+    // Send 500 immediately instead of hanging for 10 seconds!
+    res.status(500).json({ success: false, message: 'Database connection failed. Check MongoDB IP Whitelist or Credentials.' });
+  }
 });
 
 
