@@ -15,8 +15,6 @@ ParkFinder helps drivers quickly locate nearby parking in Toronto. It combines m
 
 ## Architecture diagram
 
-Rendered image:
-
 ![Architecture Diagram](docs/architecture.png)
 
 ## Tech stack
