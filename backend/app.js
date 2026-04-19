@@ -10,6 +10,7 @@ dotenv.config();
 
 import parkingRoutes from './routes/parkingRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import { errorMiddleware, notFoundMiddleware } from './middleware/errorMiddleware.js';
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.set('port', process.env.PORT || 4242);
 
 const dbUsername = process.env.DB_USERNAME;
 const dbPassword = process.env.DB_PASSWORD;
+const dbUriFromEnv = process.env.MONGODB_URI;
 
 // Middleware
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -40,15 +42,17 @@ app.use(cors({
 app.use('/admin', adminRoutes);
 app.use('/park', parkingRoutes);
 
+// 404 Not Found handler
+app.use(notFoundMiddleware);
 
-app.use((req, res, next) => {
-  res.status(404).send('Not Found');
-});
+// Global Error Handler (MUST be last)
+app.use(errorMiddleware);
 
 
 app.listen(app.get('port'), async () => {
   try {
-    await mongoose.connect(`mongodb+srv://${dbUsername}:${dbPassword}@cluster0.4twp21v.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`);
+    const mongoUri = dbUriFromEnv || `mongodb+srv://${encodeURIComponent(dbUsername || '')}:${encodeURIComponent(dbPassword || '')}@cluster0.4twp21v.mongodb.net/?appName=Cluster0`;
+    await mongoose.connect(mongoUri);
     console.log('Connected to MongoDB successfully');
     console.log(`Server running on port http://localhost:${app.get('port')}/`);
 

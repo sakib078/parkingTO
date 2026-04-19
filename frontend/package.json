@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@react-google-maps/api": "^2.20.6",
-    "@vis.gl/react-google-maps": "^1.5.0",
     "axios": "^1.7.9",
     "cra-template": "1.2.0",
     "lucide-react": "^0.476.0",
+    "maplibre-gl": "^5.23.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-map-gl": "^8.1.1",
     "react-scripts": "5.0.1",
     "web-vitals": "^4.2.4"
   },
@@ -23,10 +23,7 @@
     "extends": [
       "react-app",
       "react-app/jest"
-    ],
-    "globals": {
-      "google": "readonly"
-    }
+    ]
   },
   "browserslist": {
     "production": [

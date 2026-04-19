@@ -2,110 +2,180 @@
 
 import parkingSpots from '../models/ParkingSpot.js';
 import nearestSpot from '../utils/nearestSpots.js';
+import {
+  isValidSearchQuery,
+  isValidCoordinates,
+  isValidLatitude,
+  isValidLongitude,
+  sanitizeString,
+} from '../utils/validators.js';
+import {
+  ValidationError,
+  NotFoundError,
+  ServerError,
+  formatErrorResponse,
+} from '../utils/errorHandler.js';
 
-// Get all parking spots
-export const getSpots = async (req, res) => {
+/**
+ * Get all parking spots
+ * GET /park/spots
+ */
+export const getSpots = async (req, res, next) => {
+  try {
+    const spots = await parkingSpots.find().lean();
 
-    try {
-        await parkingSpots.find().then(spots => {
-            res.status(200).json({ spots: spots });
-        })
-
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({ error: 'Failed to fetch parking spots' });
+    if (!spots || spots.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No parking spots found',
+        spots: [],
+      });
     }
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking spots retrieved successfully',
+      count: spots.length,
+      spots: spots,
+    });
+  } catch (error) {
+    next(new ServerError('Failed to fetch parking spots', { originalError: error.message }));
+  }
 };
 
+/**
+ * Search parking spot names by query
+ * GET /park/spots/searchNames/:query
+ */
+export const searchNames = async (req, res, next) => {
+  try {
+    const { query } = req.params;
 
-export const searchNames = async (req, res) => {
-    try {
-        const { query } = req.params;
-        
-        // Create a case-insensitive regex that matches names starting with the query
-        const regex = new RegExp(`^${query}`, 'i');
-
-        const names = await parkingSpots.find({ name: regex })
-            .select("name")
-            .limit(20)
-            .lean();
-
-        const uniqueNames = [...new Set(names.map(spot => spot.name))];
-
-        res.status(200).json({ names: uniqueNames });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Failed to fetch parking names' });
+    // Validate search query
+    if (!isValidSearchQuery(query)) {
+      throw new ValidationError('Search query must be between 1-100 characters');
     }
+
+    // Sanitize query to prevent injection
+    const sanitizedQuery = sanitizeString(query);
+
+    // Create case-insensitive regex
+    const regex = new RegExp(`^${sanitizedQuery}`, 'i');
+
+    const names = await parkingSpots
+      .find({ name: regex })
+      .select('name')
+      .limit(20)
+      .lean();
+
+    // Get unique names
+    const uniqueNames = [...new Set(names.map((spot) => spot.name))];
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking names retrieved successfully',
+      count: uniqueNames.length,
+      names: uniqueNames,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return next(error);
+    }
+    next(new ServerError('Failed to fetch parking names', { originalError: error.message }));
+  }
 };
 
+/**
+ * Search parking spots by name to get coordinates
+ * GET /park/spots/search/:name
+ */
+export const searchSpots = async (req, res, next) => {
+  try {
+    const { name } = req.params;
 
-// Search for parking spots based on criteria
-export const searchSpots = async (req, res) => {
-    // Implementation for searching parking spots based on given criteria
-
-    const name = req.params.name;
-
-    console.log(name);
-
-    try {
-        // let loc_array = {};
-
-        await parkingSpots.where('name').equals(name).select("latitude longitude").then(location => {
-
-            if (location === null) {
-                const error = new Error('Could not fetch coordinates');
-                error.statusCode = 422;
-                throw error;
-            }
-
-            // for( const  cr of coordinates){
-            //     loc_array.push(cr);
-            // }
-
-            console.log(location);
-
-            res.status(200).json({ coordinates: location });
-
-        })
-    }
-    catch (error) {
-        if (!error.statusCode) {
-            error.statusCode = 500;
-        }
-        console.log(error);
+    // Validate name parameter
+    if (!isValidSearchQuery(name)) {
+      throw new ValidationError('Parking spot name must be between 1-100 characters');
     }
 
+    // Sanitize name
+    const sanitizedName = sanitizeString(name);
+
+    // Find parking spots matching the name exactly
+    const locations = await parkingSpots
+      .find({ name: { $regex: `^${sanitizedName}$`, $options: 'i' } })
+      .select('latitude longitude name')
+      .lean();
+
+    if (!locations || locations.length === 0) {
+      throw new NotFoundError('Parking spot', { query: name });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking spot coordinates retrieved successfully',
+      count: locations.length,
+      coordinates: locations,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return next(error);
+    }
+    next(new ServerError('Failed to search parking spots', { originalError: error.message }));
+  }
 };
 
-
-export const nearestSpots = async (req, res) => {
-
+/**
+ * Find nearest parking spots from given coordinates
+ * POST /park/spots/nearestSpot
+ * Body: { latitude, longitude }
+ */
+export const nearestSpots = async (req, res, next) => {
+  try {
     const { latitude, longitude } = req.body;
-    
-    if (!latitude || !longitude) {
-        return res.status(400).json({ error: 'Latitude and longitude are required' });
+
+    // Validate coordinates
+    if (!isValidLatitude(latitude)) {
+      throw new ValidationError('Invalid latitude. Must be between -90 and 90');
     }
 
-    try {
-
-        const spots = await parkingSpots.find().select('latitude longitude');
-        const results = nearestSpot([latitude, longitude], spots);
-        
-        if (results && results.length > 0) {
-
-            res.status(200).json({ results });
-
-        } else {
-
-            res.status(404).json({ message: 'No nearby spots found' });
-        }
-    } 
-    catch (error) {
-
-        console.error('Error:', error);
-        res.status(500).json({ error: 'Failed to fetch parking spots' });
+    if (!isValidLongitude(longitude)) {
+      throw new ValidationError('Invalid longitude. Must be between -180 and 180');
     }
+
+    // Fetch all parking spots
+    const spots = await parkingSpots
+      .find()
+      .select('latitude longitude name totalSpaces access')
+      .lean();
+
+    if (!spots || spots.length === 0) {
+      throw new NotFoundError('No parking spots available');
+    }
+
+    // Calculate nearest spots
+    const results = nearestSpot([latitude, longitude], spots);
+
+    if (!results || results.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No nearby parking spots found',
+        results: [],
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Nearest parking spots retrieved successfully',
+      count: results.length,
+      results: results,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return next(error);
+    }
+    next(new ServerError('Failed to fetch nearest parking spots', { originalError: error.message }));
+  }
 }
 
 

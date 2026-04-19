@@ -11,24 +11,40 @@ export function useDataContext() {
 export function DataContextProvider({ children }) {
 
   const [data, setData] = useState([]);
-  const [selectedPlace, setSelectedPlace ] = useState({});
   const [nearestLocs, setnearestLocs] = useState([]);
+  const [selectedPlace, setSelectedPlace] = useState({});
+  const [mapCenter, setMapCenter] = useState({ lat: 43.6629, lng: -79.3957 });
+  const [searchMode, setSearchMode] = useState(null); // 'name' | 'location'
 
   const value = {
     data,
     nearestLocs,
     selectedPlace,
+    mapCenter,
+    searchMode,
     handleSearch,
+    searchByLocation,
     Nearestspots,
-    setSelectedPlace
+    setSelectedPlace,
+    setMapCenter,
   }
 
+  // Search by parking spot name (existing)
   function handleSearch(value) {
     if (value) {
+      setSearchMode('name');
+      setnearestLocs([]); // Clear nearest when doing name search
       getCoordinates(value)
         .then(data => {
           if (data) {
             setData(data);
+            // Center map on first result
+            if (data.length > 0 && data[0].latitude && data[0].longitude) {
+              setMapCenter({
+                lat: parseFloat(data[0].latitude),
+                lng: parseFloat(data[0].longitude),
+              });
+            }
           } else {
             console.error('Received undefined or null data');
           }
@@ -39,6 +55,15 @@ export function DataContextProvider({ children }) {
     } else {
       console.error('No search value provided');
     }
+  }
+
+  // Search by location/address — centers map and finds nearest spots
+  function searchByLocation(lat, lng) {
+    setSearchMode('location');
+    setData([]); // Clear name search results
+    setMapCenter({ lat, lng });
+    setSelectedPlace({ lat, lng });
+    Nearestspots({ lat, lng });
   }
 
   function Nearestspots(selectedPlace) {

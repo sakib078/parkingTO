@@ -56,7 +56,7 @@ const nearestSpot = (coordinates , spots) => {
         
        let distance = harvensine(let1, long1, spot.latitude , spot.longitude);
 
-       return { _id : spot._id , latitude:spot.latitude , longitude:spot.longitude,  distance: distance }
+       return { ...spot, distance: distance }
         
     })
     

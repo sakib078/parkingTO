@@ -1,89 +1,251 @@
 
-import { error } from 'console';
 import parkingSpots from '../models/ParkingSpot.js';
-
 import { promises as fs } from 'fs';
+import {
+  isValidFileUpload,
+  isValidJSONContent,
+  isValidParkingSpotData,
+  isValidObjectId,
+  isValidCoordinates,
+  sanitizeString,
+} from '../utils/validators.js';
+import {
+  ValidationError,
+  NotFoundError,
+  ServerError,
+  ConflictError,
+  formatErrorResponse,
+} from '../utils/errorHandler.js';
 
-export const importData = async (req, res) => {
-
+/**
+ * Import parking data from JSON file
+ * POST /admin/import-data
+ */
+export const importData = async (req, res, next) => {
   try {
+    // Validate file upload
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      throw new ValidationError('No file uploaded');
     }
 
-    const jsonData = await fs.readFile(req.file.path, 'utf8');
-    const parkingData = JSON.parse(jsonData);
+    const fileValidation = isValidFileUpload(req.file);
+    if (!fileValidation.isValid) {
+      // Clean up file if upload is invalid
+      await fs.unlink(req.file.path).catch(() => {});
+      throw new ValidationError('Invalid file upload', fileValidation.errors);
+    }
 
-    console.log(parkingData);
+    // Read and parse JSON file
+    let jsonData;
+    try {
+      const jsonContent = await fs.readFile(req.file.path, 'utf8');
+      jsonData = JSON.parse(jsonContent);
+    } catch (error) {
+      await fs.unlink(req.file.path).catch(() => {});
+      throw new ValidationError('Invalid JSON format in uploaded file');
+    }
 
-    const processedData = parkingData.map(spot => ({
+    // Validate JSON content
+    const contentValidation = isValidJSONContent(jsonData);
+    if (!contentValidation.isValid) {
+      await fs.unlink(req.file.path).catch(() => {});
+      throw new ValidationError('Invalid parking data format', contentValidation.errors);
+    }
+
+    // Transform data
+    const processedData = jsonData.map((spot) => ({
       assetId: spot['Parking Lot Asset ID'],
-      name: spot['Park Name'],
+      name: sanitizeString(spot['Park Name'] || ''),
       totalSpaces: spot['Total Spaces'],
-      regularSpaces: spot['Parking Spaces'],
-      handicapSpaces: spot['Handicap Parking Spaces'],
-      latitude: spot.Latitude,
-      longitude: spot.Longitude,
-      access: spot.Access || 'Unknown'
+      regularSpaces: spot['Parking Spaces'] || 0,
+      handicapSpaces: spot['Handicap Parking Spaces'] || 0,
+      latitude: parseFloat(spot.Latitude),
+      longitude: parseFloat(spot.Longitude),
+      access: spot.Access || 'Unknown',
     }));
 
-    await parkingSpots.insertMany(processedData);
+    // Validate transformed data
+    const invalidRecords = processedData
+      .map((data, index) => ({
+        index,
+        validation: isValidParkingSpotData(data),
+      }))
+      .filter((item) => !item.validation.isValid);
 
-    // Delete the uploaded file after processing
-    await fs.unlink(req.file.path);
+    if (invalidRecords.length > 0) {
+      await fs.unlink(req.file.path).catch(() => {});
+      const errors = invalidRecords
+        .slice(0, 5)
+        .map((item) => `Record ${item.index}: ${item.validation.errors.join(', ')}`);
+      throw new ValidationError('Invalid parking data in records', errors);
+    }
 
-    res.status(200).json({ message: 'Data imported successfully' });
+    // Insert data into database
+    const result = await parkingSpots.insertMany(processedData, { ordered: false });
+
+    // Clean up uploaded file
+    await fs.unlink(req.file.path).catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking data imported successfully',
+      importedCount: result.length,
+      totalRecords: jsonData.length,
+    });
   } catch (error) {
-    console.error('Import error:', error);
-    res.status(500).json({ error: 'Failed to import data' });
+    // Clean up file on error
+    if (req.file) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
+
+    if (error instanceof ValidationError || error instanceof ServerError) {
+      return next(error);
+    }
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      return next(
+        new ConflictError('Some parking spots already exist in database', {
+          duplicateKey: Object.keys(error.keyPattern),
+        })
+      );
+    }
+
+    next(new ServerError('Failed to import parking data', { originalError: error.message }));
   }
 };
 
-
-// export const getAllParkingSpots = async (req, res) => {
-
-//   try {
-
-//     await parkingSpots.find().then(spots => {
-//       res.status(200).json(spots);
-//     })
-   
-//   } catch (error) {
-//     console.log(error);
-//     res.status(500).json({ error: 'Failed to fetch parking spots' });
-//   }
-// };
-
-export const createParkingSpot = async (req, res) => {
+/**
+ * Create a new parking spot
+ * POST /admin/parking-spots
+ */
+export const createParkingSpot = async (req, res, next) => {
   try {
-    const newParkingSpot = new parkingSpots(req.body);
-    await newParkingSpot.save();
-    res.status(201).json(newParkingSpot);
+    // Validate parking spot data
+    const validation = isValidParkingSpotData(req.body);
+    if (!validation.isValid) {
+      throw new ValidationError('Invalid parking spot data', validation.errors);
+    }
+
+    // Sanitize name
+    const spotData = {
+      ...req.body,
+      name: sanitizeString(req.body.name),
+    };
+
+    const newParkingSpot = new parkingSpots(spotData);
+    const saved = await newParkingSpot.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Parking spot created successfully',
+      data: saved,
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create parking spot' });
+    if (error instanceof ValidationError) {
+      return next(error);
+    }
+
+    // Handle MongoDB validation errors
+    if (error.name === 'ValidationError') {
+      const details = Object.values(error.errors).map((err) => err.message);
+      return next(new ValidationError('Validation error', details));
+    }
+
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return next(
+        new ConflictError('Parking spot with this asset ID already exists', {
+          duplicateKey: Object.keys(error.keyPattern),
+        })
+      );
+    }
+
+    next(new ServerError('Failed to create parking spot', { originalError: error.message }));
   }
 };
 
-export const updateParkingSpot = async (req, res) => {
+/**
+ * Update an existing parking spot
+ * PUT /admin/parking-spots/:id
+ */
+export const updateParkingSpot = async (req, res, next) => {
   try {
-    const updatedSpot = await parkingSpots.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // Validate ID
+    if (!isValidObjectId(req.params.id)) {
+      throw new ValidationError('Invalid parking spot ID format');
+    }
+
+    // Validate update data (partial validation allowed)
+    if (req.body && Object.keys(req.body).length > 0) {
+      const validation = isValidParkingSpotData(req.body);
+      if (!validation.isValid) {
+        throw new ValidationError('Invalid update data', validation.errors);
+      }
+    }
+
+    // Sanitize name if provided
+    const updateData = {
+      ...req.body,
+      ...(req.body.name && { name: sanitizeString(req.body.name) }),
+    };
+
+    const updatedSpot = await parkingSpots.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
     if (!updatedSpot) {
-      return res.status(404).json({ error: 'Parking spot not found' });
+      throw new NotFoundError('Parking spot');
     }
-    res.status(200).json(updatedSpot);
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking spot updated successfully',
+      data: updatedSpot,
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update parking spot' });
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return next(error);
+    }
+
+    if (error.name === 'ValidationError') {
+      const details = Object.values(error.errors).map((err) => err.message);
+      return next(new ValidationError('Validation error', details));
+    }
+
+    next(new ServerError('Failed to update parking spot', { originalError: error.message }));
   }
 };
 
-export const deleteParkingSpot = async (req, res) => {
+/**
+ * Delete a parking spot
+ * DELETE /admin/parking-spots/:id
+ */
+export const deleteParkingSpot = async (req, res, next) => {
   try {
-    const deletedSpot = await parkingSpots.findByIdAndDelete(req.params.id);
-    if (!deletedSpot) {
-      return res.status(404).json({ error: 'Parking spot not found' });
+    // Validate ID
+    if (!isValidObjectId(req.params.id)) {
+      throw new ValidationError('Invalid parking spot ID format');
     }
-    res.status(200).json({ message: 'Parking spot deleted successfully' });
+
+    const deletedSpot = await parkingSpots.findByIdAndDelete(req.params.id);
+
+    if (!deletedSpot) {
+      throw new NotFoundError('Parking spot');
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Parking spot deleted successfully',
+      deletedSpot: deletedSpot,
+    });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete parking spot' });
+    if (error instanceof ValidationError || error instanceof NotFoundError) {
+      return next(error);
+    }
+
+    next(new ServerError('Failed to delete parking spot', { originalError: error.message }));
   }
-};
+}
